@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Integration — Riemann Sums</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #fff; color: #1a1a1a; padding: 20px; max-width: 700px; margin: 0 auto; }
+  @media (prefers-color-scheme: dark) { body { background: #1a1a1a; color: #e0ddd4; } }
+  .ctrl-row { display:flex; align-items:center; gap:10px; margin-bottom:10px; font-size:13px; color:#888; }
+  .ctrl-row input[type=range] { flex:1; accent-color:#534AB7; }
+  .ctrl-val { font-weight:500; color:#1a1a1a; min-width:40px; text-align:right; font-size:13px; }
+  @media (prefers-color-scheme: dark) { .ctrl-val { color:#e0ddd4; } }
+  .fn-btns, .method-btns { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .fn-btn, .method-btn { font-size:12px; padding:4px 12px; border-radius:8px; border:0.5px solid #ccc; background:transparent; color:#888; cursor:pointer; transition:background .15s; }
+  .fn-btn.active { background:#e6f1fb; color:#185FA5; border-color:#85B7EB; }
+  .method-btn.active { background:#f0f0ee; color:#1a1a1a; border-color:#888; }
+  @media (prefers-color-scheme: dark) {
+    .fn-btn, .method-btn { border-color:#444; color:#888; }
+    .fn-btn.active { background:#0C447C; color:#B5D4F4; border-color:#378ADD; }
+    .method-btn.active { background:#333; color:#e0ddd4; border-color:#666; }
+    .ctrl-val { color:#e0ddd4; }
+  }
+  .metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:14px 0; }
+  .metric { background:#f5f5f3; border-radius:8px; padding:10px 14px; }
+  @media (prefers-color-scheme: dark) { .metric { background:#2a2a28; } }
+  .metric .ml { font-size:11px; color:#888; margin-bottom:3px; }
+  .metric .mv { font-size:18px; font-weight:500; }
+  .metric .mv.good { color:#1D9E75; }
+  .metric .mv.err { color:#D85A30; }
+  canvas { width:100%; display:block; border-radius:8px; border:0.5px solid rgba(0,0,0,0.1); }
+  @media (prefers-color-scheme: dark) { canvas { border-color:rgba(255,255,255,0.1); } }
+  .note { margin-top:10px; font-size:12px; color:#888; line-height:1.7; border-top:0.5px solid rgba(0,0,0,0.1); padding-top:10px; }
+</style>
+</head>
+<body>
+
+<div class="fn-btns">
+  <button class="fn-btn active" data-fn="0">sin(x)</button>
+  <button class="fn-btn" data-fn="1">x²</button>
+  <button class="fn-btn" data-fn="2">x³ − 2x</button>
+  <button class="fn-btn" data-fn="3">e^(−x²)</button>
+</div>
+
+<div class="method-btns">
+  <button class="method-btn active" data-m="mid">Midpoint</button>
+  <button class="method-btn" data-m="left">Left</button>
+  <button class="method-btn" data-m="right">Right</button>
+</div>
+
+<div class="ctrl-row">
+  Rectangles
+  <input type="range" id="n-slider" min="1" max="100" step="1" value="6">
+  <span class="ctrl-val" id="n-val">6</span>
+</div>
+
+<div class="metrics">
+  <div class="metric"><div class="ml">Approximate area</div><div class="mv" id="m-approx">—</div></div>
+  <div class="metric"><div class="ml">Exact area</div><div class="mv good" id="m-exact">—</div></div>
+  <div class="metric"><div class="ml">Error</div><div class="mv err" id="m-err">—</div></div>
+</div>
+
+<canvas id="c" height="300"></canvas>
+
+<div class="note">
+  Each rectangle has width Δx and height f(x). Their total area ≈ ∫f(x)dx. As n → ∞, the gap between approximate and exact vanishes.
+</div>
+
+<script>
+const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+const FUNCS = [
+  { f: x => Math.sin(x), exact: (a,b) => -Math.cos(b)+Math.cos(a), a: 0, b: Math.PI },
+  { f: x => x*x, exact: (a,b) => b**3/3-a**3/3, a: 0, b: 3 },
+  { f: x => x**3-2*x, exact: (a,b) => b**4/4-b**2-(a**4/4-a**2), a: -1, b: 2 },
+  { f: x => Math.exp(-x*x), exact: (a,b) => {
+    const erf = t => { const s=t<0?-1:1; t=Math.abs(t); const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911; const x2=1/(1+p*t); return s*(1-(((((a5*x2+a4)*x2+a3)*x2+a2)*x2+a1)*x2)*Math.exp(-t*t)); };
+    return Math.sqrt(Math.PI)/2*(erf(b)-erf(a));
+  }, a:-2, b:2 },
+];
+let fnIdx=0, method='mid', N=6;
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+const COL_RECT=dark?'rgba(83,74,183,0.35)':'rgba(83,74,183,0.22)';
+const COL_RECT_STROKE=dark?'#7F77DD':'#534AB7';
+const COL_CURVE=dark?'#5DCAA5':'#0F6E56';
+const COL_FILL=dark?'rgba(29,158,117,0.12)':'rgba(29,158,117,0.10)';
+const COL_AXIS=dark?'rgba(255,255,255,0.15)':'rgba(0,0,0,0.12)';
+const COL_GRID=dark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.06)';
+const COL_TEXT=dark?'#888780':'#888780';
+function resize(){const w=canvas.parentElement.clientWidth;canvas.width=w;canvas.height=Math.round(w*0.52);draw();}
+function draw(){
+  const W=canvas.width,H=canvas.height,PAD={l:44,r:16,t:16,b:36};
+  const pw=W-PAD.l-PAD.r,ph=H-PAD.t-PAD.b;
+  const fn=FUNCS[fnIdx];const{f,exact,a,b}=fn;
+  ctx.clearRect(0,0,W,H);
+  const samples=300,ys=[];
+  for(let i=0;i<=samples;i++)ys.push(f(a+(b-a)*i/samples));
+  const yMin=Math.min(0,...ys)*1.15,yMax=(Math.max(0,...ys)*1.15)||0.1;
+  const toX=x=>PAD.l+(x-a)/(b-a)*pw;
+  const toY=y=>PAD.t+(1-(y-yMin)/(yMax-yMin))*ph;
+  const y0=toY(0);
+  ctx.strokeStyle=COL_GRID;ctx.lineWidth=0.5;
+  for(let i=0;i<=4;i++){const yv=yMin+(yMax-yMin)*i/4,yp=toY(yv);ctx.beginPath();ctx.moveTo(PAD.l,yp);ctx.lineTo(W-PAD.r,yp);ctx.stroke();ctx.fillStyle=COL_TEXT;ctx.font='10px system-ui,sans-serif';ctx.textAlign='right';ctx.fillText(yv.toFixed(1),PAD.l-5,yp+4);}
+  ctx.strokeStyle=COL_AXIS;ctx.lineWidth=0.5;ctx.beginPath();ctx.moveTo(PAD.l,y0);ctx.lineTo(W-PAD.r,y0);ctx.stroke();
+  for(let i=0;i<=4;i++){const xv=a+(b-a)*i/4,xp=toX(xv);ctx.fillStyle=COL_TEXT;ctx.textAlign='center';ctx.fillText(xv.toFixed(1),xp,H-PAD.b+14);ctx.strokeStyle=COL_AXIS;ctx.beginPath();ctx.moveTo(xp,y0-3);ctx.lineTo(xp,y0+3);ctx.stroke();}
+  const dx=(b-a)/N;let approxArea=0;
+  for(let i=0;i<N;i++){const xl=a+i*dx,xr=xl+dx;let xm=method==='left'?xl:method==='right'?xr:(xl+xr)/2;const ht=f(xm);approxArea+=ht*dx;const rx=toX(xl),rw=toX(xr)-toX(xl),ry=ht>=0?toY(ht):y0,rh=Math.abs(toY(ht)-y0);ctx.fillStyle=COL_RECT;ctx.fillRect(rx,ry,rw,rh);ctx.strokeStyle=COL_RECT_STROKE;ctx.lineWidth=0.75;ctx.strokeRect(rx,ry,rw,rh);}
+  ctx.beginPath();ctx.moveTo(toX(a),y0);for(let i=0;i<=samples;i++){const x=a+(b-a)*i/samples;ctx.lineTo(toX(x),toY(f(x)));}ctx.lineTo(toX(b),y0);ctx.closePath();ctx.fillStyle=COL_FILL;ctx.fill();
+  ctx.beginPath();for(let i=0;i<=samples;i++){const x=a+(b-a)*i/samples;i===0?ctx.moveTo(toX(x),toY(f(x))):ctx.lineTo(toX(x),toY(f(x)));}ctx.strokeStyle=COL_CURVE;ctx.lineWidth=2;ctx.stroke();
+  const trueArea=exact(a,b),err=Math.abs(approxArea-trueArea);
+  document.getElementById('m-approx').textContent=approxArea.toFixed(4);
+  document.getElementById('m-exact').textContent=trueArea.toFixed(4);
+  document.getElementById('m-err').textContent=err<0.0001?'< 0.0001':err.toFixed(4);
+}
+document.querySelectorAll('.fn-btn').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('.fn-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');fnIdx=+btn.dataset.fn;draw();}));
+document.querySelectorAll('.method-btn').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('.method-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');method=btn.dataset.m;draw();}));
+document.getElementById('n-slider').addEventListener('input',function(){N=+this.value;document.getElementById('n-val').textContent=N;draw();});
+window.addEventListener('resize',resize);
+resize();
+</script>
+</body>
+</html>
